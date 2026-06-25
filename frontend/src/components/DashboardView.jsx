@@ -71,7 +71,7 @@ export default function DashboardView({ data, loading, error, onCategoryChange }
         <KpiCard label="Unique Categories"   value={kpis.unique_categories}    color="#0dbf6f" />
         <KpiCard label="Unique Subcategories" value={kpis.unique_subcategories} color="#9b5dff" />
         <KpiCard label="Unique Clients"      value={kpis.unique_clients}       color="#ff8b00" />
-        <KpiCard label="Unique Brands"       value={kpis.unique_brands}        color="#ff2f92" />
+        <KpiCard label="Unique Brand Models"  value={kpis.unique_brands}        color="#ff2f92" />
         <KpiCard label="Unique Markets"      value={kpis.unique_markets}       color="#00a3ff" />
       </div>
 
@@ -79,7 +79,7 @@ export default function DashboardView({ data, loading, error, onCategoryChange }
         {/* LEFT — Bar chart */}
         <section className="chart-card bars-card">
           <div className="chart-head-row">
-            <h3>Top Categories by Number of Brands</h3>
+            <h3>Top Categories by Number of Brand Models</h3>
             <button
               className="toggle-btn"
               onClick={() => setBarShowPct(p => !p)}
@@ -100,14 +100,14 @@ export default function DashboardView({ data, loading, error, onCategoryChange }
                   max={barShowPct ? barPctMax : barMax}
                 />
               )
-            }) : <p className="chart-empty">No category brand count data.</p>}
+            }) : <p className="chart-empty">No category brand model data.</p>}
           </div>
         </section>
 
         {/* RIGHT — Donut chart */}
         <section className="chart-card donut-card">
           <div className="chart-head-row">
-            <h3>Distribution of Brands by Category</h3>
+            <h3>Distribution of Brand Models by Category</h3>
             <label className="category-slicer">
               <span>Category</span>
               <select value={selectedCategory} onChange={(e) => onCategoryChange?.(e.target.value)}>
@@ -133,7 +133,7 @@ export default function DashboardView({ data, loading, error, onCategoryChange }
                   <span className="legend-label">{item.label}</span>
                   <span className="legend-value">{item.count} <span className="legend-pct">({item.percentage}%)</span></span>
                 </div>
-              )) : <p className="chart-empty">No brand distribution data.</p>}
+              )) : <p className="chart-empty">No brand model distribution data.</p>}
             </div>
           </div>
         </section>

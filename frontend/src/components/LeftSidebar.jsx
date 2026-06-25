@@ -171,13 +171,37 @@ export default function LeftSidebar({
           </div>
 
           <div className="sidebar-footer">
-            <span>Brand Structure Analytics · KAP</span>
+            <span>Brand Model Structure Analytics · KAP</span>
           </div>
         </>
       )}
 
       {collapsed && (
-        <div className="collapsed-rail-spacer" aria-hidden="true"></div>
+        <>
+          <div className="collapsed-shortcuts" aria-label="Collapsed sidebar actions">
+            <button
+              type="button"
+              className={`collapsed-shortcut-btn ${isDashboardActive ? 'active' : ''}`}
+              onClick={onOpenDashboard}
+              aria-label="Open dashboard"
+              title="Dashboard"
+            >
+              <FiBarChart2 size={18} />
+            </button>
+
+            <button
+              type="button"
+              className="collapsed-shortcut-btn"
+              onClick={onNewChat}
+              aria-label="Start new chat"
+              title="New Chat"
+            >
+              <FiPlus size={20} />
+            </button>
+          </div>
+
+          <div className="collapsed-rail-spacer" aria-hidden="true"></div>
+        </>
       )}
 
       {!collapsed && (

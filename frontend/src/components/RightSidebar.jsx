@@ -2,6 +2,8 @@ import './RightSidebar.css'
 
 export default function RightSidebar({
   lastRoute,
+  lastRawRoute,
+  lastMergedRoute,
   lastProjects,
   lastFactors,
   lastRetrievalNote,
@@ -114,6 +116,32 @@ export default function RightSidebar({
               <pre className="json-display">{JSON.stringify(lastRoute, null, 2)}</pre>
             ) : (
               <p className="empty-state">No route data yet</p>
+            )}
+          </div>
+        </div>
+
+        <div className="section">
+          <div className="section-header static">
+            <span className="section-title">Raw route JSON</span>
+          </div>
+          <div className="section-content">
+            {lastRawRoute ? (
+              <pre className="json-display">{JSON.stringify(lastRawRoute, null, 2)}</pre>
+            ) : (
+              <p className="empty-state">No raw route data yet</p>
+            )}
+          </div>
+        </div>
+
+        <div className="section">
+          <div className="section-header static">
+            <span className="section-title">Merged route JSON</span>
+          </div>
+          <div className="section-content">
+            {lastMergedRoute ? (
+              <pre className="json-display">{JSON.stringify(lastMergedRoute, null, 2)}</pre>
+            ) : (
+              <p className="empty-state">No merged route data yet</p>
             )}
           </div>
         </div>

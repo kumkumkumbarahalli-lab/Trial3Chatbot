@@ -12,36 +12,65 @@ const RIGHT_SIDEBAR_MIN = 220
 const RIGHT_SIDEBAR_MAX = 420
 
 const STARTER_PROMPTS = [
+  'Top 5 categories by number of brand models',
   'Have we worked in Dubai before?',
+  'List the sub categories in Home Decor',
+  'How many markets have we worked with Nescafe?',
+  'Which brand models are most diversified across markets?',
+  'What clients have we worked with in Egypt?',
   'How many Banking projects have we done?',
-  'Have we worked near Coke or Pepsi’s space?',
-  'What factors did we use for Beer brands?',
-  'Show me all FMCG projects',
-  'Which clients are repeat buyers?',
-  'Have we worked in Southeast Asia?',
-  'What emotional factors have we used for Food brands?',
+  'Which categories are present in both India and Egypt?'
 ]
 
-const WELCOME_MESSAGE = 'Hi, I can answer from your Excel data. Ask me about a project, factor flow, brand, market, or dependent variable.'
+const WELCOME_MESSAGE = 'Insight mode on. Explore projects by category, brand model, market, or client.'
+
+const EMPTY_RETRIEVAL_NOTE = 'No retrieval yet. Ask a question to see retrieval output.'
+
+function createChatId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function createDefaultMessages() {
+  return [
+    {
+      role: 'assistant',
+      content: WELCOME_MESSAGE,
+    },
+  ]
+}
+
+function createChatState(id) {
+  return {
+    id,
+    name: 'New Chat',
+    createdAt: new Date(),
+    messages: createDefaultMessages(),
+    lastRoute: null,
+    lastRawRoute: null,
+    lastMergedRoute: null,
+    routeHistory: [],
+    lastProjects: [],
+    lastFactors: [],
+    lastRetrievalNote: EMPTY_RETRIEVAL_NOTE,
+  }
+}
 
 function App() {
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [showLeftSidebar, setShowLeftSidebar] = useState(true)
   const [showRightSidebar, setShowRightSidebar] = useState(true)
-  const [leftSidebarWidth, setLeftSidebarWidth] = useState(272)
+  const [leftSidebarWidth, setLeftSidebarWidth] = useState(245)
   const [rightSidebarWidth, setRightSidebarWidth] = useState(252)
   const [chats, setChats] = useState([])
   const [currentChatId, setCurrentChatId] = useState(null)
-  const [messages, setMessages] = useState([
-    {
-      role: 'assistant',
-      content: WELCOME_MESSAGE,
-    },
-  ])
+  const [messages, setMessages] = useState(createDefaultMessages)
   const [lastRoute, setLastRoute] = useState(null)
+  const [lastRawRoute, setLastRawRoute] = useState(null)
+  const [lastMergedRoute, setLastMergedRoute] = useState(null)
+  const [routeHistory, setRouteHistory] = useState([])
   const [lastProjects, setLastProjects] = useState([])
   const [lastFactors, setLastFactors] = useState([])
-  const [lastRetrievalNote, setLastRetrievalNote] = useState('No retrieval yet. Ask a question to see retrieval output.')
+  const [lastRetrievalNote, setLastRetrievalNote] = useState(EMPTY_RETRIEVAL_NOTE)
   const [activeView, setActiveView] = useState('chat')
   const [dashboardData, setDashboardData] = useState(null)
   const [dashboardLoading, setDashboardLoading] = useState(false)
@@ -51,9 +80,18 @@ function App() {
 
   // Initialize with one empty chat
   useEffect(() => {
-    const initialChatId = Date.now().toString()
-    setChats([{ id: initialChatId, name: 'New Chat', createdAt: new Date() }])
+    const initialChatId = createChatId()
+    const initialChat = createChatState(initialChatId)
+    setChats([initialChat])
     setCurrentChatId(initialChatId)
+    setMessages(initialChat.messages)
+    setLastRoute(initialChat.lastRoute)
+    setLastRawRoute(initialChat.lastRawRoute)
+    setLastMergedRoute(initialChat.lastMergedRoute)
+    setRouteHistory(initialChat.routeHistory)
+    setLastProjects(initialChat.lastProjects)
+    setLastFactors(initialChat.lastFactors)
+    setLastRetrievalNote(initialChat.lastRetrievalNote)
   }, [])
 
   // Toggle theme
@@ -150,28 +188,37 @@ function App() {
 
   // Create new chat
   const createNewChat = () => {
-    const chatId = Date.now().toString()
-    const newChat = { id: chatId, name: 'New Chat', createdAt: new Date() }
-    setChats([newChat, ...chats])
+    const chatId = createChatId()
+    const newChat = createChatState(chatId)
+
+    setChats((prevChats) => [newChat, ...prevChats])
     setCurrentChatId(chatId)
-    setMessages([
-      {
-        role: 'assistant',
-        content: WELCOME_MESSAGE,
-      },
-    ])
-    setLastRoute(null)
-    setLastProjects([])
-    setLastFactors([])
-    setLastRetrievalNote('No retrieval yet. Ask a question to see retrieval output.')
+    setMessages(newChat.messages)
+    setLastRoute(newChat.lastRoute)
+    setLastRawRoute(newChat.lastRawRoute)
+    setLastMergedRoute(newChat.lastMergedRoute)
+    setRouteHistory(newChat.routeHistory)
+    setLastProjects(newChat.lastProjects)
+    setLastFactors(newChat.lastFactors)
+    setLastRetrievalNote(newChat.lastRetrievalNote)
     setActiveView('chat')
   }
 
   // Switch to existing chat
   const switchChat = (chatId) => {
+    const selectedChat = chats.find((chat) => chat.id === chatId)
+    if (!selectedChat) return
+
     setCurrentChatId(chatId)
     setActiveView('chat')
-    // In a real app, you'd load the chat history from a database
+    setMessages(selectedChat.messages || createDefaultMessages())
+    setLastRoute(selectedChat.lastRoute || null)
+    setLastRawRoute(selectedChat.lastRawRoute || null)
+    setLastMergedRoute(selectedChat.lastMergedRoute || null)
+    setRouteHistory(selectedChat.routeHistory || [])
+    setLastProjects(selectedChat.lastProjects || [])
+    setLastFactors(selectedChat.lastFactors || [])
+    setLastRetrievalNote(selectedChat.lastRetrievalNote || EMPTY_RETRIEVAL_NOTE)
   }
 
   const renameChat = (chatId, nextName) => {
@@ -188,6 +235,7 @@ function App() {
   // Handle sending message
   const handleSendMessage = async (question) => {
     if (!question.trim()) return
+    if (!currentChatId) return
 
     // Add user message
     const updatedMessages = [...messages, { role: 'user', content: question }]
@@ -199,112 +247,134 @@ function App() {
       const routeResp = await apiCall('POST', '/api/route-query', {
         question,
         history: updatedMessages.slice(0, -1),
+        route_history: routeHistory,
       })
-      const route = routeResp
+      const route = routeResp.merged_route || routeResp
+      const rawRoute = routeResp.raw_route || route
+      const mergedRoute = routeResp.merged_route || route
 
       setLastRoute(route)
+      setLastRawRoute(rawRoute)
+      setLastMergedRoute(mergedRoute)
+      setRouteHistory((prev) => [...prev, mergedRoute])
 
       let answer = ''
       let projects = []
       let factors = []
+      let retrievalNote = EMPTY_RETRIEVAL_NOTE
 
-      if (route.intent === 'clarify') {
+      const hasPriorContext = lastProjects.length > 0 || lastFactors.length > 0
+
+      if (route.intent === 'follow_up' && !hasPriorContext) {
+        answer = "That's a follow-up, but I don't have context from a previous question. Start fresh-what brand model, market, or category interests you?"
+        retrievalNote = 'Follow-up attempted without prior context - clarification requested.'
+      } else if (route.intent === 'analytics') {
+        const analyticsResp = await apiCall('POST', '/api/analytics-answer', {
+          question,
+          route,
+        })
+        answer = analyticsResp.answer || 'No data found for that query.'
+        projects = analyticsResp.projects || []
+        retrievalNote =
+          analyticsResp.analytics_type
+            ? `Analytics query: ${analyticsResp.analytics_type} (limit ${analyticsResp.analytics_limit || 10}) - pre-computed stats passed to answer model.`
+            : 'Analytics query but no type specified.'
+      } else if (route.intent === 'clarify') {
         answer = route.clarification_question || 'Can you clarify?'
-        setLastRetrievalNote('Routing requested clarification.')
+        retrievalNote = 'Routing requested clarification.'
       } else {
-        // Step 2: Filter projects
-        const filterResp = await apiCall('POST', '/api/filter-projects', route)
+        const isFactorQuery = route.intent === 'factor_lookup' || !!route.factor_type_hint
 
-        projects = filterResp.projects || []
+        if (isFactorQuery) {
+          // Step 2a: Filter directly from factors-db
+          const factorsFilterResp = await apiCall('POST', '/api/filter-factors', route)
+          factors = factorsFilterResp.factors || []
+          projects = factorsFilterResp.projects || []
 
-        if (filterResp.clarification_message) {
-          answer = filterResp.clarification_message
-          setLastRetrievalNote('Clarification needed due to ambiguous filters.')
-        } else if (projects.length === 0) {
-          answer = 'I could not find a matching project in the database.'
-          setLastRetrievalNote('No project rows matched the current filters.')
-        } else {
-          const isFactorQuery = route.intent === 'factor_lookup' || !!route.factor_type_hint
-
-          if (
-            isFactorQuery &&
-            projects.length > 1 &&
-            !route.coe_job_number_hint
-          ) {
-            // Get unique project combinations (like main.py's unique_project_options)
-            const seen = new Set()
-            const uniqueProjects = []
-            projects.slice(0, 12).forEach((p) => {
-              const key = JSON.stringify({
-                BrandModelled: p.BrandModelled,
-                MarketforBrand: p.MarketforBrand,
-                CoEJobnumber: p.CoEJobnumber,
-                Client: p.Client,
-              })
-              if (!seen.has(key)) {
-                seen.add(key)
-                uniqueProjects.push(p)
-              }
-            })
-
-            const options = uniqueProjects
-              .map((p, i) => {
-                const bits = []
-                if (p.BrandModelled) bits.push(`BrandModelled: ${p.BrandModelled}`)
-                if (p.MarketforBrand) bits.push(`MarketforBrand: ${p.MarketforBrand}`)
-                if (p.CoEJobnumber) bits.push(`CoEJobnumber: ${p.CoEJobnumber}`)
-                if (p.Client) bits.push(`Client: ${p.Client}`)
-                return `${i + 1}. ${bits.join(' | ')}`
-              })
-              .join('\n')
-
-            answer = `I found multiple matching projects for factors. Please provide more detail (CoE job number, brand, market, or client).\n\nMatches:\n${options}`
-            setLastRetrievalNote('Multiple projects matched a factor query; awaiting disambiguation.')
+          if (factorsFilterResp.clarification_message) {
+            answer = factorsFilterResp.clarification_message
+            retrievalNote = 'Multiple projects in factors-db; awaiting disambiguation.'
+          } else if (factors.length === 0) {
+            answer = 'I could not find any factors matching your criteria in the factors database.'
+            retrievalNote = 'No factors matched the filters in factors-db.'
           } else {
-            // Step 3: Fetch factors if needed
-            if (isFactorQuery) {
-              const factorsResp = await apiCall('POST', '/api/fetch-factors', {
-                projects,
-                route,
-              })
-              factors = factorsResp.factors || []
+            answer = formatFactorsResponse(factors)
+            retrievalNote = 'Factor retrieval from factors-db completed.'
+          }
+        } else {
+          // Step 2b: Filter projects from complete-db for non-factor queries
+          const filterResp = await apiCall('POST', '/api/filter-projects', route)
+          projects = filterResp.projects || []
 
-              answer = formatFactorsResponse(factors)
-              setLastRetrievalNote('Factor retrieval completed.')
+          if (filterResp.clarification_message) {
+            answer = filterResp.clarification_message
+            retrievalNote = 'Clarification needed due to ambiguous filters.'
+          } else if (projects.length === 0) {
+            if (route.intent === 'follow_up') {
+              const contextSummary = getContextSummary(lastProjects)
+              answer = `That did not narrow it down. We were just discussing ${contextSummary}. Can you be more specific?`
+              retrievalNote = 'Follow-up returned no matches - provided context reminder.'
             } else {
-              // Step 4: Get answer from Groq
-              const answerResp = await apiCall('POST', '/api/answer', {
-                question,
-                route,
-                project_rows: projects,
-                factor_rows: factors,
-              })
-              answer = answerResp.answer
-              setLastRetrievalNote('Project retrieval completed and passed to answer model.')
+              answer = 'I could not find a matching project in the database.'
+              retrievalNote = 'No project rows matched the current filters.'
             }
+          } else {
+            // Step 3: Get answer from Groq
+            const answerResp = await apiCall('POST', '/api/answer', {
+              question,
+              route,
+              project_rows: projects,
+              factor_rows: factors,
+            })
+            answer = answerResp.answer
+            retrievalNote = 'Project retrieval completed and passed to answer model.'
           }
         }
       }
 
       setLastProjects(projects)
       setLastFactors(factors)
+      setLastRetrievalNote(retrievalNote)
 
       // Add assistant response
       const finalMessages = [...updatedMessages, { role: 'assistant', content: answer }]
       setMessages(finalMessages)
+      const latestRouteHistory = [...routeHistory, mergedRoute]
 
-      // Update chat name based on first user message
       setChats((prevChats) =>
         prevChats.map((chat) =>
           chat.id === currentChatId
-            ? { ...chat, name: question.substring(0, 30) + (question.length > 30 ? '...' : '') }
+            ? {
+                ...chat,
+                name: question.substring(0, 30) + (question.length > 30 ? '...' : ''),
+                messages: finalMessages,
+                lastRoute: route,
+                lastRawRoute: rawRoute,
+                lastMergedRoute: mergedRoute,
+                routeHistory: latestRouteHistory,
+                lastProjects: projects,
+                lastFactors: factors,
+                lastRetrievalNote: retrievalNote,
+              }
             : chat
         )
       )
+
     } catch (error) {
       console.error('Error:', error)
       const errorMessage = `Error: ${error.message}`
-      setMessages([...updatedMessages, { role: 'assistant', content: errorMessage }])
+      const erroredMessages = [...updatedMessages, { role: 'assistant', content: errorMessage }]
+      setMessages(erroredMessages)
+      setChats((prevChats) =>
+        prevChats.map((chat) =>
+          chat.id === currentChatId
+            ? {
+                ...chat,
+                messages: erroredMessages,
+              }
+            : chat
+        )
+      )
     } finally {
       setLoading(false)
     }
@@ -351,6 +421,8 @@ function App() {
       {showRightSidebar && activeView !== 'dashboard' && (
         <RightSidebar
           lastRoute={lastRoute}
+          lastRawRoute={lastRawRoute}
+          lastMergedRoute={lastMergedRoute}
           lastProjects={lastProjects}
           lastFactors={lastFactors}
           lastRetrievalNote={lastRetrievalNote}
@@ -360,6 +432,25 @@ function App() {
       )}
     </div>
   )
+}
+
+function getContextSummary(projects) {
+  if (!projects || projects.length === 0) {
+    return 'no previous context'
+  }
+
+  const brands = [...new Set(projects.map((p) => p.BrandModelled).filter(Boolean))]
+  const markets = [...new Set(projects.map((p) => p.MarketforBrand).filter(Boolean))]
+  const parts = []
+
+  if (brands.length > 0) {
+    parts.push(`Brand models: ${brands.join(', ')}`)
+  }
+  if (markets.length > 0) {
+    parts.push(`Markets: ${markets.join(', ')}`)
+  }
+
+  return parts.join(' | ') || 'no previous context'
 }
 
 function clamp(value, min, max) {

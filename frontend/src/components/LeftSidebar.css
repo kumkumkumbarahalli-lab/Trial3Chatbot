@@ -1,6 +1,6 @@
 .left-sidebar {
-  width: 272px;
-  flex: 0 0 272px;
+  width: 245px;
+  flex: 0 0 252px;
   height: 100%;
   position: relative;
   display: flex;
@@ -64,6 +64,40 @@
 
 .collapsed-rail-spacer {
   flex: 1;
+}
+
+.collapsed-shortcuts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 0;
+}
+
+.collapsed-shortcut-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #ecf2ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.collapsed-shortcut-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.collapsed-shortcut-btn.active {
+  background: rgba(116, 144, 255, 0.22);
+  border-color: rgba(134, 158, 255, 0.42);
+  color: #ffffff;
 }
 
 .sidebar-resize-handle {
@@ -311,6 +345,11 @@
   .new-chat-btn,
   .chat-item {
     font-size: 12px;
+  }
+
+  .collapsed-shortcut-btn {
+    width: 34px;
+    height: 34px;
   }
 }
 

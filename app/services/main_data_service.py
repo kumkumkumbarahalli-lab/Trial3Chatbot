@@ -1,266 +1,47 @@
+from __future__ import annotations
+
 import json
-import os
-from pathlib import Path
 
-import httpx
 import pandas as pd
-from dotenv import load_dotenv
-from groq import Groq
 
-load_dotenv()
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-COMPLETE_PATH = DATA_DIR / "Complete-DB.xlsx"
-FACTORS_PATH = DATA_DIR / "Factors-DB.xlsx"
-
-API_KEY = os.getenv("GROQ_API_KEY", "")
-
-SSL_CERT = os.getenv("SSL_CERT_FILE", False)
-_http_client = httpx.Client(verify=SSL_CERT)
-client = Groq(api_key=API_KEY, http_client=_http_client) if API_KEY else None
+from app.core.text_utils import cell_matches_hint, normalize_text, split_multi_values
 
 
-def load_data():
-    complete = pd.read_excel(COMPLETE_PATH)
-    factors = pd.read_excel(FACTORS_PATH)
-
-    complete.columns = [str(c).strip() for c in complete.columns]
-    factors.columns = [str(c).strip() for c in factors.columns]
-
-    complete = complete.fillna("")
-    factors = factors.fillna("")
-
-    for col in complete.columns:
-        if complete[col].dtype == object:
-            complete[col] = complete[col].astype(str).str.strip()
-
-    for col in factors.columns:
-        if factors[col].dtype == object:
-            factors[col] = factors[col].astype(str).str.strip()
-
-    if "sequence" not in factors.columns:
-        factors["sequence"] = range(1, len(factors) + 1)
-
-    return complete, factors
+def safe_str(value):
+    return "" if value is None else str(value).strip()
 
 
-complete_df, factors_df = load_data()
-
-
-def safe_str(x):
-    return "" if x is None else str(x).strip()
-
-
-def build_catalog_text():
-    cols = [c for c in ["CoEJobnumber", "BrandModelled", "MarketforBrand", "Dependentvar", "Category", "SubCategory", "Client"] if c in complete_df.columns]
+def build_catalog_text(complete_df: pd.DataFrame) -> str:
+    cols = [
+        c
+        for c in [
+            "CoEJobnumber",
+            "BrandModelled",
+            "MarketforBrand",
+            "Dependentvar",
+            "Category",
+            "SubCategory",
+            "Client",
+        ]
+        if c in complete_df.columns
+    ]
     sample = complete_df[cols].head(20).to_dict(orient="records")
     return json.dumps(sample, ensure_ascii=False, indent=2)
 
 
-def _correct_misclassified_hints(route: dict, complete_df) -> dict:
-    """
-    If hint is an exact match for a unique value in a different column,
-    move it there. This helps when LLM confuses 'Food' (category) with
-    partial brand names like 'Pet Food'.
-    """
-    corrected = route.copy()
-    checks = [
-        ("brand_hint", "BrandModelled"),
-        ("client_hint", "Client"),
-        ("market_hint", "MarketforBrand"),
-        ("category_hint", "Category"),
-        ("subcategory_hint", "SubCategory"),
-        ("dependent_var_hint", "Dependentvar"),
-    ]
-    
-    for hint_key, expected_col in checks:
-        hint_value = safe_str(corrected.get(hint_key))
-        if not hint_value:
-            continue
-        
-        best_col = None
-        best_match_count = 0
-        
-        for other_hint_key, other_col in checks:
-            if other_col not in complete_df.columns:
-                continue
-            
-            matches = complete_df[other_col].astype(str).apply(lambda x: value_matches(x, hint_value))
-            match_count = matches.sum()
-            if match_count == 0:
-                continue
-            
-            # Check for exact match where hint equals a unique value
-            unique_vals = complete_df[other_col].astype(str).str.strip().unique()
-            exact_match = any(norm_text(hint_value) == norm_text(v) for v in unique_vals if v)
-            
-            if exact_match:
-                best_col = (other_hint_key, other_col)
-                break
-            
-            if match_count > best_match_count:
-                best_match_count = match_count
-                best_col = (other_hint_key, other_col)
-        
-        if best_col and best_col[1] != expected_col:
-            other_hint_key, other_col = best_col
-            corrected[hint_key] = None
-            corrected[other_hint_key] = hint_value
-            if hint_key in ["category_hint", "subcategory_hint"]:
-                if other_col == "Category":
-                    corrected["category_scope"] = "category"
-                elif other_col == "SubCategory":
-                    corrected["category_scope"] = "subcategory"
-    
-    return corrected
-
-
-def route_query(question, history):
-    system_prompt = """
-You are a routing engine for a data assistant that has TWO separate databases:
-1. **Complete-DB** (PROJECT queries): Contains projects with Brand, Market, Category, SubCategory, Dependent Variable, Client
-2. **Factors-DB** (FACTOR queries): Contains factors/drivers/attributes that influenced project outcomes
-Your job is NOT to answer the question.
-Your job is to decide what the app should retrieve from the database.
-
-CRITICAL DISTINCTION:
-
-PROJECT LOOKUP → Questions asking about project metadata/demographics:
-- "What brands have we worked with?"
-- "How many markets did we cover?"
-- "List categories we've done"
-- User is asking: "What projects exist? What were their basic characteristics?"
-
-FACTOR LOOKUP → Questions asking what INFLUENCED/DROVE/AFFECTED projects OR about specific factor attributes:
-- "What emotional aspects influenced Nescafe?" (emotional = factor attribute)
-- "List functional characteristics for this brand" (functional = factor attribute)
-- "What are the product intrinsics?" (product intrinsics = factor attribute)
-- "Show higher order outcomes" (higher order outcomes = factor attribute)
-- "What drivers affected brand perception?"
-- "Show factor flow"
-- User is asking: "What made this happen? What influenced the result? What attributes affected outcomes?"
-
-FACTOR ATTRIBUTES (examples - may include many more):
-- emotional, functional, characteristics, aspects, intrinsics, attributes
-- higher order outcomes, drivers, KPIs, outcomes
-- brand perception, awareness, consideration, purchase intent
-- etc. (basically any attribute that's NOT brand/market/category/client/DV)
-
-Return only valid JSON with these keys:
-{
-  "intent": "project_lookup" | "factor_lookup" | "follow_up" | "summary" | "analytics" | "clarify",
-    "brand_hint": string or null,
-    "client_hint": string or null,
-  "market_hint": string or null,
-    "category_hint": string or null,
-    "subcategory_hint": string or null,
-    "dependent_var_hint": string or null,
-  "factor_type_hint": string or null,
-    "coe_job_number_hint": string or null,
-    "brand_client_scope": "brand" | "client" | null,
-    "category_scope": "category" | "subcategory" | null,
-  "analytics_type": string or null (e.g., "top_brands", "least_markets", "most_categories"),
-  "analytics_limit": number (default 10),
-  "needs_followup_context": true or false,
-  "clarification_question": string or null
-}
-
-Rules:
-
-- If asking about BRAND/MARKET/CATEGORY/SUBCATEGORY/DEPENDENT_VAR/CLIENT specifically, use "project_lookup"
-- If the user asks for factors, order, flow, or type, use factor_lookup.
-- If user asks for top/most/least/frequent items (brands, categories, markets, clients), use intent "analytics" and set analytics_type accordingly.
-- If the user refers to "that", "same one", "what about", "those", "similar", "alike", use follow_up.
-- If the question has no specific filters (brand, market, category, etc.), use clarify.
-- If the question is one word or very vague (like "similar", "details", "more"), use clarify unless context is obvious.
-- If unsure, use clarify.
-- Do not explain. Do not add markdown. Output JSON only.
-"""
-
-    messages = [{"role": "system", "content": system_prompt}]
-    if history:
-        messages.extend(history[-4:])
-    messages.append({"role": "user", "content": question})
-
-    resp = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=messages,
-        temperature=0,
-    )
-    text = resp.choices[0].message.content.strip()
-    default_route = {
-        "intent": "clarify",
-        "brand_hint": None,
-        "client_hint": None,
-        "market_hint": None,
-        "category_hint": None,
-        "subcategory_hint": None,
-        "dependent_var_hint": None,
-        "factor_type_hint": None,
-        "coe_job_number_hint": None,
-        "brand_client_scope": None,
-        "category_scope": None,
-        "analytics_type": None,
-        "analytics_limit": 10,
-        "needs_followup_context": False,
-        "clarification_question": "I need more specifics. Try asking about a specific Brand, Market, Category, or Client.",
-    }
-    try:
-        parsed = json.loads(text)
-        if not isinstance(parsed, dict):
-            return default_route
-        merged = default_route.copy()
-        merged.update(parsed)
-        # Correct misclassified hints before returning
-        merged = _correct_misclassified_hints(merged, complete_df)
-        return merged
-    except Exception:
-        return default_route
-
-
 def norm_text(value):
-    return "".join(ch for ch in safe_str(value).lower() if ch.isalnum())
-
-
-MULTI_VALUE_COLUMNS = {
-    "BrandModelled",
-    "MarketforBrand",
-    "Client",
-    "ClientName",
-    "Market",
-    "Country",
-}
+    return normalize_text(value)
 
 
 def split_cell_values(value):
-    raw = safe_str(value)
-    if not raw:
-        return []
-    normalized = raw.replace(";", ",")
-    return [part.strip() for part in normalized.split(",") if part.strip()]
+    return split_multi_values(value)
 
 
 def value_matches(cell_value, hint):
-    needle = norm_text(hint)
-    if not needle:
-        return False
-
-    tokens = [norm_text(token) for token in split_cell_values(cell_value)]
-    tokens = [token for token in tokens if token]
-
-    # For very short hints, require exact token match to avoid noisy matches.
-    if len(needle) < 3:
-        return needle in tokens
-
-    if tokens:
-        return any(token == needle or needle in token or token in needle for token in tokens)
-
-    cell_norm = norm_text(cell_value)
-    return needle in cell_norm
+    return cell_matches_hint(cell_value, hint, is_multi_value=True)
 
 
-def contains_mask(df, col, hint):
+def contains_mask(df: pd.DataFrame, col: str, hint):
     if col not in df.columns or not safe_str(hint):
         return pd.Series(False, index=df.index)
     return df[col].astype(str).apply(lambda x: value_matches(x, hint))
@@ -302,7 +83,7 @@ def _project_display_label(column_name):
     return label_map.get(column_name, column_name)
 
 
-def unique_project_options(df):
+def unique_project_options(df: pd.DataFrame):
     cols = _project_display_columns(df)
     opts = df[cols].drop_duplicates().head(12)
     lines = []
@@ -315,18 +96,15 @@ def unique_project_options(df):
     return "\n".join(lines)
 
 
-def factor_project_options(factor_rows):
-    """Generate project options from factors-db without factor details."""
+def factor_project_options(factor_rows: pd.DataFrame):
     if factor_rows.empty:
         return ""
 
     display_cols = _project_display_columns(factor_rows)
     if not display_cols:
         return ""
-    
-    project_rows = factor_rows[display_cols].drop_duplicates().head(12)
 
-    # Build display lines in the same order as Excel columns.
+    project_rows = factor_rows[display_cols].drop_duplicates().head(12)
     lines = []
     for idx, proj_data in enumerate(project_rows.to_dict(orient="records"), start=1):
         line_bits = []
@@ -340,7 +118,7 @@ def factor_project_options(factor_rows):
     return "\n".join(lines)
 
 
-def filter_projects(route):
+def filter_projects(complete_df: pd.DataFrame, route: dict):
     df = complete_df.copy()
     mask = pd.Series(True, index=df.index)
     used_filters = 0
@@ -433,8 +211,7 @@ def filter_projects(route):
     return df[mask].copy(), None
 
 
-def filter_factors_directly(route):
-    """Filter factors-db directly for factor queries, returns unique projects and factors."""
+def filter_factors_directly(factors_df: pd.DataFrame, route: dict):
     df = factors_df.copy()
     mask = pd.Series(True, index=df.index)
     used_filters = 0
@@ -455,7 +232,7 @@ def filter_factors_directly(route):
     if safe_str(party_hint):
         brand_mask = contains_mask(df, "BrandModelled", party_hint)
         client_mask = contains_mask(df, "Client", party_hint) if "Client" in df.columns else pd.Series(False, index=df.index)
-        
+
         if brand_mask.any():
             mask &= brand_mask
             used_filters += 1
@@ -472,14 +249,11 @@ def filter_factors_directly(route):
         return df.iloc[0:0].copy(), None
 
     filtered_factors = df[mask].copy()
-    
-    # Get unique projects from filtered factors
     unique_projects = filtered_factors[["CoEJobnumber", "BrandModelled", "MarketforBrand"]].drop_duplicates()
-    
     return filtered_factors, unique_projects
 
 
-def fetch_factors_for_projects(projects, route):
+def fetch_factors_for_projects(factors_df: pd.DataFrame, projects: pd.DataFrame, route: dict):
     if projects.empty:
         return factors_df.iloc[0:0].copy()
 
@@ -519,7 +293,7 @@ def project_summary(row):
     return "\n".join(bits)
 
 
-def factor_summary(fdf):
+def factor_summary(fdf: pd.DataFrame):
     if fdf.empty:
         return "No linked factor rows found."
     cols = [c for c in ["sequence", "FactorType", "FactorName", "FactorValue", "FactorLabel"] if c in fdf.columns]
@@ -535,7 +309,7 @@ def factor_type_rank(ftype):
     return 2
 
 
-def format_factors_response(fdf):
+def format_factors_response(fdf: pd.DataFrame):
     if fdf.empty:
         return "No linked factor rows found for this selection."
 
@@ -569,19 +343,13 @@ def format_factors_response(fdf):
     return "\n".join(lines).strip() or "No linked factor rows found for this selection."
 
 
-def build_context_for_groq(project_rows, route, question=None):
-    """
-    Filter project context to only show relevant fields based on what was asked.
-    Always hide: CoEJobnumber, sequence
-    Conditionally show: SubCategory (if asked), Client (if asked), Dependentvar (if asked)
-    Always show: BrandModelled, MarketforBrand, Category
-    """
+def build_context_for_groq(project_rows: pd.DataFrame, route: dict, question=None):
     if project_rows.empty:
         return []
-    
-    # Core fields always shown
+
     core_fields = ["BrandModelled", "MarketforBrand", "Category"]
     optional_fields = []
+
     question_text = safe_str(question).lower()
 
     if safe_str(route.get("subcategory_hint")) or safe_str(route.get("category_scope")).lower() == "subcategory" or "subcategor" in question_text:
@@ -590,12 +358,9 @@ def build_context_for_groq(project_rows, route, question=None):
         optional_fields.append("Client")
     if safe_str(route.get("dependent_var_hint")):
         optional_fields.append("Dependentvar")
-    
-    # Build list of fields to include
+
     fields_to_include = core_fields + optional_fields
     fields_to_include = [f for f in fields_to_include if f in project_rows.columns]
-    
-    # De-duplicate on the exact fields being sent — safe because we only send what was asked
     records = project_rows[fields_to_include].drop_duplicates().to_dict(orient="records")
     return records
 
@@ -610,40 +375,15 @@ def _detect_count_dimension(question):
     q = safe_str(question).lower()
 
     if "subcategor" in q or "sub categor" in q:
-        return {
-            "column": "SubCategory",
-            "singular": "subcategory",
-            "plural": "subcategories",
-            "heading": "Subcategories",
-        }
+        return {"column": "SubCategory", "singular": "subcategory", "plural": "subcategories", "heading": "Subcategories"}
     if "categor" in q:
-        return {
-            "column": "Category",
-            "singular": "category",
-            "plural": "categories",
-            "heading": "Categories",
-        }
+        return {"column": "Category", "singular": "category", "plural": "categories", "heading": "Categories"}
     if "market" in q or "country" in q:
-        return {
-            "column": "MarketforBrand",
-            "singular": "market",
-            "plural": "markets",
-            "heading": "Markets",
-        }
+        return {"column": "MarketforBrand", "singular": "market", "plural": "markets", "heading": "Markets"}
     if "client" in q:
-        return {
-            "column": "Client",
-            "singular": "client",
-            "plural": "clients",
-            "heading": "Clients",
-        }
+        return {"column": "Client", "singular": "client", "plural": "clients", "heading": "Clients"}
     if "brand" in q:
-        return {
-            "column": "BrandModelled",
-            "singular": "brand",
-            "plural": "brands",
-            "heading": "Brands",
-        }
+        return {"column": "BrandModelled", "singular": "brand", "plural": "brands", "heading": "Brands"}
     if "dependent" in q or "dv" in q:
         return {
             "column": "Dependentvar",
@@ -652,12 +392,7 @@ def _detect_count_dimension(question):
             "heading": "Dependent Variables",
         }
     if "project" in q:
-        return {
-            "column": None,
-            "singular": "project",
-            "plural": "projects",
-            "heading": "Projects",
-        }
+        return {"column": None, "singular": "project", "plural": "projects", "heading": "Projects"}
 
     return None
 
@@ -665,29 +400,17 @@ def _detect_count_dimension(question):
 def _build_scope_suffix(route):
     parts = []
 
-    brand = safe_str(route.get("brand_hint"))
-    if brand:
-        parts.append(f"brand '{brand}'")
-
-    client = safe_str(route.get("client_hint"))
-    if client:
-        parts.append(f"client '{client}'")
-
-    market = safe_str(route.get("market_hint"))
-    if market:
-        parts.append(f"market '{market}'")
-
-    category = safe_str(route.get("category_hint"))
-    if category:
-        parts.append(f"category '{category}'")
-
-    subcategory = safe_str(route.get("subcategory_hint"))
-    if subcategory:
-        parts.append(f"subcategory '{subcategory}'")
-
-    dependent = safe_str(route.get("dependent_var_hint"))
-    if dependent:
-        parts.append(f"dependent variable '{dependent}'")
+    for key, label in [
+        ("brand_hint", "brand"),
+        ("client_hint", "client"),
+        ("market_hint", "market"),
+        ("category_hint", "category"),
+        ("subcategory_hint", "subcategory"),
+        ("dependent_var_hint", "dependent variable"),
+    ]:
+        value = safe_str(route.get(key))
+        if value:
+            parts.append(f"{label} '{value}'")
 
     if not parts:
         return ""
@@ -696,10 +419,6 @@ def _build_scope_suffix(route):
 
 
 def build_deterministic_count_response(question, route, project_rows, analytics_stats=None):
-    """
-    Build guaranteed count + value-list output for count-style project questions.
-    Returns None if the question should continue through the LLM path.
-    """
     if analytics_stats:
         return None
 
@@ -748,22 +467,18 @@ def build_deterministic_count_response(question, route, project_rows, analytics_
     return "\n".join(lines)
 
 
-def check_project_has_factors(brand, market):
-    """
-    Check if a specific project (identified by brand and market) has factors in factors_db.
-    Returns True if factors exist, False otherwise.
-    """
+def check_project_has_factors(factors_df: pd.DataFrame, brand, market):
     if factors_df.empty:
         return False
-    
+
     mask = pd.Series(True, index=factors_df.index)
-    
+
     if "BrandModelled" in factors_df.columns and safe_str(brand):
         mask &= factors_df["BrandModelled"].astype(str).str.lower() == safe_str(brand).lower()
-    
+
     if "MarketforBrand" in factors_df.columns and safe_str(market):
         mask &= factors_df["MarketforBrand"].astype(str).str.lower() == safe_str(market).lower()
-    
+
     return mask.any()
 
 
@@ -776,10 +491,6 @@ def _is_missing_route_value(value):
 
 
 def merge_followup_route(route, route_history):
-    """
-    For underspecified follow-ups (e.g., "what about nespresso"), inherit
-    missing filters and query mode from the latest meaningful route.
-    """
     if safe_str(route.get("intent")).lower() != "follow_up":
         return route
 
@@ -816,7 +527,6 @@ def merge_followup_route(route, route_history):
         if _is_missing_route_value(merged.get(key)) and not _is_missing_route_value(base_route.get(key)):
             merged[key] = base_route.get(key)
 
-    # Keep the prior retrieval mode when the follow-up is ambiguous.
     base_intent = safe_str(base_route.get("intent")).lower()
     if safe_str(merged.get("intent")).lower() == "follow_up":
         if safe_str(base_route.get("factor_type_hint")) or base_intent == "factor_lookup":
@@ -829,13 +539,9 @@ def merge_followup_route(route, route_history):
     return merged
 
 
-def compute_aggregation_stats(df, analytics_type, limit=10):
-    """
-    Compute pre-aggregated statistics for top/least/most queries.
-    Returns a dictionary with the computed stats.
-    """
+def compute_aggregation_stats(df: pd.DataFrame, analytics_type, limit=10):
     stats = {}
-    
+
     if not df.empty:
         analytics_type_value = safe_str(analytics_type).lower()
         is_top_request = "top" in analytics_type_value or "most" in analytics_type_value
@@ -871,7 +577,7 @@ def compute_aggregation_stats(df, analytics_type, limit=10):
                 stats["top_clients"] = df["Client"].value_counts().head(limit).to_dict() if "Client" in df.columns else {}
             elif refers_dependent:
                 stats["top_dependent_vars"] = df["Dependentvar"].value_counts().head(limit).to_dict() if "Dependentvar" in df.columns else {}
-        
+
         elif is_least_request:
             if refers_brand:
                 stats["least_brands"] = df["BrandModelled"].value_counts().tail(limit).to_dict() if "BrandModelled" in df.columns else {}
@@ -883,64 +589,5 @@ def compute_aggregation_stats(df, analytics_type, limit=10):
                 stats["least_clients"] = df["Client"].value_counts().tail(limit).to_dict() if "Client" in df.columns else {}
             elif refers_dependent:
                 stats["least_dependent_vars"] = df["Dependentvar"].value_counts().tail(limit).to_dict() if "Dependentvar" in df.columns else {}
-    
+
     return stats
-
-
-def answer_with_groq(question, route, project_rows, factor_rows, analytics_stats=None, history=None):
-    if client is None:
-        return "GROQ_API_KEY is missing."
-
-    deterministic_response = build_deterministic_count_response(
-        question,
-        route,
-        project_rows,
-        analytics_stats,
-    )
-    if deterministic_response:
-        return deterministic_response
-
-    system_prompt = """
-You are a conversational assistant for a sales team pitching analytics solutions.
-Answer concisely and directly from the provided project data and stats.
-
-Formatting rules:
-- Write concise answers, like you're talking to a busy executive.
-- No long paragraphs.
-- Lead with key facts (counts/summaries) when relevant to the question.
-- For ranking questions (top/least/most), format as a numbered list with project counts next to each item.
-- Use bullet points for non-ranking lists - one item per line.
-- Show only: Brand, Market, Category.
-- Use SubCategory and Client when they are present in the context and relevant to the question.
-- Include Dependent Variable only if it's in the data provided.
-- If aggregated_stats are provided, use them as the primary source for counts and rankings.
-- Never mention or invent facts about CoE Job Numbers or technical IDs.
-- Do not invent data.
-"""
-
-    # Build filtered context with only relevant fields
-    filtered_projects = build_context_for_groq(project_rows, route, question)
-    
-    context = {
-        "projects": filtered_projects,
-    }
-    # Include pre-computed stats if available
-    if analytics_stats:
-        context["aggregated_stats"] = analytics_stats
-    # Only include factors if there are any
-    if not factor_rows.empty:
-        context["factors"] = factor_rows.to_dict(orient="records")
-
-    messages = [{"role": "system", "content": system_prompt}]
-    if history:
-        messages.extend(history[-8:])
-    messages.append({"role": "user", "content": f"Question: {question}\n\nContext:\n{json.dumps(context, ensure_ascii=False)}"})
-
-    resp = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
-        messages=messages,
-        temperature=0.2,
-    )
-    return resp.choices[0].message.content.strip()
-
-

@@ -4,7 +4,7 @@ export default function MarketCards({ marketBreakdown, loading, selectedMarket }
   if (!selectedMarket) {
     return (
       <div className="market-cards-hint">
-        Click a highlighted country on the map or use the Market slicer to explore category and brand breakdowns.
+        Click a highlighted country on the map or use the Market slicer to explore category and brand model breakdowns.
       </div>
     )
   }
@@ -52,19 +52,19 @@ export default function MarketCards({ marketBreakdown, loading, selectedMarket }
         )}
       </section>
 
-      {/* Right — Brands */}
+      {/* Right — Brand Models */}
       <section className="chart-card market-card">
         <div className="chart-head-row">
-          <h3>Brands</h3>
+          <h3>Brand Models</h3>
           <span className="market-card-tag">{selectedMarket}</span>
         </div>
-        <p className="rows-label">{brands.length} brands</p>
+        <p className="rows-label">{brands.length} brand models</p>
         {brands.length > 0 ? (
           <div className="market-table-wrapper">
             <table className="data-table">
               <thead>
                 <tr>
-                  <th>Brand</th>
+                  <th>Brand Model</th>
                   <th>#</th>
                 </tr>
               </thead>
@@ -79,7 +79,7 @@ export default function MarketCards({ marketBreakdown, loading, selectedMarket }
             </table>
           </div>
         ) : (
-          <p className="chart-empty">No brand data for this market.</p>
+          <p className="chart-empty">No brand model data for this market.</p>
         )}
       </section>
     </div>

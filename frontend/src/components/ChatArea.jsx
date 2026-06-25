@@ -64,7 +64,7 @@ export default function ChatArea({
             <div className="landing-orb"></div>
             <div className="landing-copy">
               <h2>KANTAR BrandEcho</h2>
-              <p>Search brand analytics projects through natural language</p>
+              <p>Search brand model analytics projects through natural language</p>
             </div>
 
             <div className="starter-grid">
@@ -112,7 +112,7 @@ export default function ChatArea({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Ask about project categories, brands, markets and factors."
+            placeholder="Ask about project categories, brand models, markets and factors."
             rows="1"
             disabled={loading}
           />

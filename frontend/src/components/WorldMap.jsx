@@ -54,8 +54,10 @@ const COUNTRY_META = {
   'Czech Republic': { isoNumeric: '203', coords: [15.47,  49.82],  zoom: 5.5 },
   'Taiwan':         { isoNumeric: '158', coords: [120.97, 23.70],  zoom: 7   },
   'Netherlands':    { isoNumeric: '528', coords: [5.29,   52.13],  zoom: 7   },
+  'Colombia':       { isoNumeric: '170', coords: [-74.30,  4.57],  zoom: 3.5 },
   'Columbia':       { isoNumeric: '170', coords: [-74.30,  4.57],  zoom: 3.5 },
   'Tanzania':       { isoNumeric: '834', coords: [34.89,  -6.37],  zoom: 4.5 },
+  'Guatemala':      { isoNumeric: '320', coords: [-90.23, 15.78],  zoom: 6   },
   'Guatemela':      { isoNumeric: '320', coords: [-90.23, 15.78],  zoom: 6   },
   'Honduras':       { isoNumeric: '340', coords: [-86.24, 15.20],  zoom: 5.5 },
   'Sao Paulo':      { isoNumeric: '076', coords: [-46.63,-23.55],  zoom: 5   },
@@ -138,7 +140,7 @@ export default function WorldMap({ markets = [], marketOptions = [], selectedMar
   return (
     <section className="chart-card map-card">
       <div className="chart-head-row">
-        <h3>Brand Presence Across Markets</h3>
+        <h3>Brand Model Presence Across Markets</h3>
         {marketOptions.length > 0 && (
           <label className="category-slicer">
             <span>Market</span>
